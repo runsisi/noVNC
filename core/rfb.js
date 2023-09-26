@@ -23,7 +23,7 @@ import Cursor from "./util/cursor.js";
 import Websock from "./websock.js";
 import KeyTable from "./input/keysym.js";
 import XtScancode from "./input/xtscancodes.js";
-import { encodings } from "./encodings.js";
+import { encodingName, encodings } from "./encodings.js";
 import RSAAESAuthenticationState from "./ra2.js";
 import legacyCrypto from "./crypto/crypto.js";
 
@@ -2110,6 +2110,7 @@ export default class RFB extends EventTargetMixin {
 
         if (this._fbDepth == 24) {
             encs.push(encodings.pseudoEncodingVMwareCursor);
+            encs.push(encodings.pseudoEncodingAlphaCursor);
             encs.push(encodings.pseudoEncodingCursor);
         }
 
@@ -2519,6 +2520,9 @@ export default class RFB extends EventTargetMixin {
             case encodings.pseudoEncodingVMwareCursor:
                 return this._handleVMwareCursor();
 
+            case encodings.pseudoEncodingAlphaCursor:
+                return this._handleAlphaCursor();
+
             case encodings.pseudoEncodingCursor:
                 return this._handleCursor();
 
@@ -2650,6 +2654,44 @@ export default class RFB extends EventTargetMixin {
             Log.Warn("The given cursor type is not supported: "
                       + cursorType + " given.");
             return false;
+        }
+
+        this._updateCursor(rgba, hotx, hoty, w, h);
+
+        return true;
+    }
+
+    _handleAlphaCursor() {
+        const hotx = this._FBU.x;  // hotspot-x
+        const hoty = this._FBU.y;  // hotspot-y
+        const w = this._FBU.width;
+        const h = this._FBU.height;
+
+        if (this._sock.rQwait("alpha cursor encoding", 4)) {
+            return false;
+        }
+
+        const encoding = this._sock.rQshift32();
+
+        // qemu supports raw encoding only
+        // https://github.com/qemu/qemu/blob/v8.1.0/ui/vnc.c#L1005
+        if (encoding !== encodings.encodingRaw) {
+            throw new Error("alpha cursor encoding: " + encodingName(encoding) + " not supported yet");
+        }
+
+        if (this._sock.rQwait("alpha cursor encoding", (w * h * 4), 4)) {
+            return false;
+        }
+
+        let rgba = new Array(w * h * 4);
+
+        for (let pixel = 0; pixel < (w * h); pixel++) {
+            let data = this._sock.rQshift32();
+
+            rgba[(pixel * 4)] = data >> 24 & 0xff; //r
+            rgba[(pixel * 4) + 1] = data >> 16 & 0xff; //g
+            rgba[(pixel * 4) + 2] = data >> 8 & 0xff;  //b
+            rgba[(pixel * 4) + 3] = data & 0xff;       //a
         }
 
         this._updateCursor(rgba, hotx, hoty, w, h);
